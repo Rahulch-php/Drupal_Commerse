@@ -1,0 +1,51 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the uc_gift_order module.
+ *
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function uc_gift_order_schema() {
+  $schema['uc_gift_orders'] = array(
+    'description' => 'Determines if an Ubercart order was purchased as a gift.',
+    'fields' => array(
+      'gift_id' => array(
+        'description' => 'The row id.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'order_id' => array(
+        'description' => 'The identifier of the order.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'gift_mark' => array(
+        'description' => 'Is this a Gift?',
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'gift_message' => array(
+        'description' => 'A short message for the recipient of the gift.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+    ),
+    'indexes' => array(
+      'order_id' => array('order_id'),
+    ),
+    'primary key' => array('gift_id'),
+  );
+
+  return $schema;
+}

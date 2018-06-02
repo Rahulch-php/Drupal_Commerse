@@ -1,0 +1,6 @@
+name = UC Gift Order
+description = Adds a checkout pane that lets customers mark an order as a gift at checkout.
+dependencies[] = uc_cart
+files[] = uc_gift_order.module
+package = Ubercart - extra
+core = 7.x

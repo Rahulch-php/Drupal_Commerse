@@ -1,0 +1,420 @@
+<?php
+
+/**
+ * @file
+ * Defines a checkout pane that lets customers mark an order as a gift.
+ * @author Original post by xenbutter
+ * @author Upgraded to d6 and maintained by jrust
+ * @author Ported to D7 by jerry
+ */
+
+/*******************************************************************************
+ * Hook Functions (Ubercart)
+ ******************************************************************************/
+
+/**
+ * Implements hook_menu().
+ */
+function uc_gift_order_menu() {
+  global $user;
+  $items = array();
+  $items['admin/store/orders/%/invoice/gift_order'] = array(
+    'title' => 'Gift message',
+    'page callback' => 'uc_gift_order_print',
+    'page arguments' => array(3),
+    'access arguments' => array(3, 'view all orders'),
+    'access callback' => 'uc_gift_order_is_gift',
+    'weight' => 3,
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['admin/store/customers/gift_recipients'] = array(
+    'title' => 'Gift recipients',
+    'page callback' => 'uc_gift_order_recipients',
+    'access arguments' => array('view customers'),
+    'weight' => 3,
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['admin/store/customers/download_recipients_csv'] = array(
+    'page callback' => 'uc_gift_order_recipients_csv',
+    'access arguments' => array('view customers'),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_uc_checkout_pane().
+ */
+function uc_gift_order_uc_checkout_pane() {
+  $panes[] = array(
+    'id' => 'gift_order',
+    'callback' => 'uc_checkout_pane_gift_order',
+    'title' => t('Gift Order'),
+    'desc' => t('Let customers mark an order as a gift and provide a gift card message.'),
+    'weight' => 5,
+  );
+
+  return $panes;
+}
+
+/**
+ * Implements hook_uc_order().
+ */
+function uc_gift_order_uc_order($op, $order, $arg2) {
+  switch ($op) {
+    // Save the gift to the database.
+    case 'save':
+      if (isset($order->gift_order_mark)) {
+        if (is_array($order->gift_order_mark)) {
+          $order_mark = $order->gift_order_mark['#value'];
+        }
+        else {
+          $order_mark = $order->gift_order_mark;
+        }
+      }
+      else {
+        $order_mark = 0;
+      }
+      if ($order_mark && isset($order->gift_order_message)) {
+        if (is_array($order->gift_order_message)) {
+          $order_message = $order->gift_order_message['#value'];
+        }
+        else {
+          $order_message = $order->gift_order_message;
+        }
+      }
+      else {
+        $order_message = '';
+      }
+      db_delete('uc_gift_orders')
+        ->condition('order_id', $order->order_id)
+        ->execute();
+      $id = db_insert('uc_gift_orders')
+        ->fields(array(
+          'order_id' => $order->order_id,
+          'gift_mark' => $order_mark,
+          'gift_message' => $order_message,
+        ))
+        ->execute();
+      break;
+
+      // Load the gift status from the database.
+    case 'load':
+      $result = db_query('SELECT * FROM {uc_gift_orders} WHERE order_id = :order_id', array(':order_id' => $order->order_id));
+      if ($data = $result->fetchObject()) {
+        $order->gift_order_mark = $data->gift_mark;
+        $order->gift_order_message = $data->gift_message;
+      }
+      else {
+        $order->gift_order_mark = 0;
+        $order->gift_order_message = '';
+      }
+      break;
+
+      // Delete the gift status from the database.
+    case 'delete':
+      db_delete('uc_gift_orders')
+        ->condition('order_id', $order->order_id)
+        ->execute();
+      break;
+  }
+}
+
+/**
+ * Implements hook_uc_order_pane().
+ */
+function uc_gift_order_uc_order_pane() {
+  $panes[] = array(
+    'id' => 'gift_order',
+    'callback' => 'uc_order_pane_gift_order',
+    'title' => t('Gift Status'),
+    'desc' => t('Is this order a gift?'),
+    'class' => 'abs-left',
+    'weight' => 5,
+    'show' => array('view', 'edit'),
+  );
+
+  return $panes;
+}
+
+/**
+ * Implements hook_uc_invoice_templates().
+ */
+function uc_gift_order_uc_invoice_templates() {
+  return array('gift_message');
+}
+
+/**
+ * Implements hook_theme().
+ */
+function uc_gift_order_theme($existing, $type, $theme, $path) {
+  $path = drupal_get_path('module', 'uc_order');
+  $theme_hooks = array(
+    'uc_order__gift_message' => array(
+      'template' => 'uc-order--gift_message',
+      'path' => $path . '/templates',
+      'variables' => array(
+        'order' => NULL,
+        'op' => 'print',
+        'template' => 'gift_message',
+        'thank_you_message' => FALSE,
+        'help_text' => FALSE,
+        'email_text' => FALSE,
+        'store_footer' => FALSE,
+        'business_header' => FALSE,
+        'shipping_method' => FALSE,
+      ),
+    ),
+  );
+
+  return $theme_hooks;
+}
+
+/*******************************************************************************
+ * Callback Functions, Forms, and Tables
+ ******************************************************************************/
+
+/**
+ * Returns the gift status of an order.
+ */
+function uc_gift_order_is_gift($order_id, $perms) {
+  $order = uc_order_load($order_id);
+  return isset($order->gift_order_mark) && $order->gift_order_mark && user_access($perms);
+}
+
+/**
+ * Callback function for checkout pane hook.
+ */
+function uc_checkout_pane_gift_order($op, $order, $form = NULL, &$form_state = NULL) {
+  switch ($op) {
+    case 'view':
+      $description = t('');
+      $contents['gift_order_mark'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Is this a gift order?'),
+        '#default_value' => isset($order->gift_order_mark) ? $order->gift_order_mark : 0,
+        '#description' => t('A message will be included in the order if this is checked.'),
+      );
+      $contents['gift_order_message'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Gift message'),
+        '#description' => t('Enter the message to be included with your gift.'),
+        '#default_value' => isset($order->gift_order_message) ? $order->gift_order_message : '',
+        '#maxlength' => 255,
+      );
+      return array('description' => $description, 'contents' => $contents);
+
+    case 'process':
+      $pane = $form_state['values']['panes']['gift_order'];
+      if ($pane['gift_order_mark'] == TRUE) {
+        $order->gift_order_mark = $pane['gift_order_mark'];
+        $order->gift_order_message = $pane['gift_order_message'];
+      }
+      return TRUE;
+
+    case 'review':
+      if ($order->gift_order_mark == TRUE) {
+        $review[] = array(
+          'title' => t('Gift Message'),
+          'data' => $order->gift_order_message,
+        );
+      }
+      else {
+        $review = NULL;
+      }
+      return $review;
+  }
+}
+
+/**
+ * Callback function for order pane hook.
+ */
+function uc_order_pane_gift_order($op, $order, &$form = NULL, &$form_state = NULL) {
+  switch ($op) {
+    case 'view':
+      if (empty($order->gift_order_mark)) {
+        return;
+      }
+      else {
+        return array('#markup' => '<div class="messages is-gift-order"><strong>' . t('This order is a gift!') . '</strong>&nbsp;&nbsp;' . l('(print gift message)', 'admin/store/orders/' . $order->order_id . '/invoice/gift_order') . '</div>');
+      }
+
+    case 'edit-form':
+      $form['gift_order_mark'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('This order is a gift'),
+        '#default_value' => $order->gift_order_mark,
+      );
+      $form['gift_order_message'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Gift message'),
+        '#description' => t('Enter a message to be included with your gift.'),
+        '#default_value' => $order->gift_order_message,
+        '#maxlength' => 255,
+      );
+      return $form;
+
+    case 'edit-theme':
+      $output = '<div class="order-edit-gift">';
+      $output .= drupal_render($form['gift_order_mark']);
+      $output .= drupal_render($form['gift_order_message']);
+      $output .= '</div>';
+      return $output;
+
+    case 'edit-process':
+      $changes['gift_order_mark'] = $form['gift_order_mark'];
+      $changes['gift_order_message'] = $form['gift_order_message'];
+      return $changes;
+  }
+}
+
+/**
+ * Display a gift card to be printed.
+ */
+function uc_gift_order_print($order_id) {
+  $order = uc_order_load($order_id);
+
+  if ($order === FALSE) {
+    drupal_set_message(t('Order %order_id does not exist.', array('%order_id' => $order_id)));
+    drupal_goto('admin/store/orders');
+  }
+
+  $build = array(
+    '#theme' => 'uc_order',
+    '#order' => $order,
+    '#op' => 'print',
+    '#template' => 'gift_message',
+  );
+
+  drupal_add_http_header('Content-Type', 'text/html; charset=utf-8');
+  print theme('uc_order_invoice_page', array('content' => drupal_render($build)));
+  exit();
+}
+
+/**
+ * Display a list of gift order recipients.
+ */
+function uc_gift_order_recipients() {
+  $header = array(
+    array('data' => t('#')),
+    array(
+      'data' => t('First Name'),
+      'field' => "delivery_first_name",
+    ),
+    array(
+      'data' => t('Last Name'),
+      'field' => "delivery_last_name",
+    ),
+    array(
+      'data' => t('Street 1'),
+      'field' => "delivery_street1",
+    ),
+    array(
+      'data' => t('Street 2'),
+      'field' => "delivery_street2",
+    ),
+    array(
+      'data' => t('City'),
+      'field' => "delivery_city",
+    ),
+    array(
+      'data' => t('Zone'),
+      'field' => "delivery_zone",
+    ),
+    array(
+      'data' => t('Postal Code'),
+      'field' => "delivery_postal_code",
+    ),
+    array(
+      'data' => t('Country'),
+      'field' => "delivery_country",
+    ),
+    array(
+      'data' => t('Order Date'),
+      'field' => "created",
+      'sort' => 'desc',
+    ),
+  );
+  $page_size = (array_key_exists('nopage', $_GET)) ? PHP_INT_MAX : 30;
+  $rows = array();
+  $query = _uc_gift_order_get_recipient_query();
+  $recipients = $query->extend('PagerDefault')->limit($page_size)->execute();
+  while ($recipient = $recipients->fetchAssoc()) {
+    $rows[] = $recipient;
+  }
+  if (empty($rows)) {
+    $rows[] = array(array(
+        'data' => t('No Gift Order receipients found'),
+        'colspan' => count($header),
+      ));
+  }
+  $output = '<p>Below is the list of the delivery addresses for orders that were marked as Gift Orders.</p>';
+  $output .= theme('table', array('header' => $header, 'rows' => $rows, 'attributes' => array(
+      'width' => '100%',
+      'class' => array('uc-recipients-table'),
+    )));
+  $output .= theme('pager');
+  $output .= '<div class="uc-gift-order-links">' . l(t('Export to CSV file.'), 'admin/store/customers/download_recipients_csv') . '&nbsp;&nbsp;&nbsp;' . ((array_key_exists('nopage', $_GET)) ? l(t('Show paged records'), 'admin/store/customers/gift_recipients') : l(t('Show all records'), 'admin/store/customers/gift_recipients', array('query' => array('nopage' => '1')))) . '</div>';
+  return $output;
+}
+
+/**
+ * Export a CSV list of gift order recipients.
+ */
+function uc_gift_order_recipients_csv() {
+  ob_end_clean();
+  $http_headers = array(
+    'Pragma' => 'private',
+    'Expires' => '0',
+    'Cache-Control' => 'private, must-revalidate',
+    'Content-Transfer-Encoding' => 'binary',
+    'Content-Disposition' => 'attachment; filename="gift-order-recipients.csv"',
+    'Content-Type' => 'text/csv',
+  );
+  foreach ($http_headers as $header => $value) {
+    $value = preg_replace('/\r?\n(?!\t| )/', '', $value);
+    drupal_add_http_header($header, $value);
+  }
+
+  $headers = array(t('Order #'), t('First Name'), t('Last Name'), t('Street 1'), t('Street 2'), t('City'), t('Zone'), t('Postal Code'), t('Country'), t('Order Date'));
+  $fp = fopen('php://output', 'w');
+  fputcsv($fp, $headers);
+
+  $query = _uc_gift_order_get_recipient_query();
+  $recipients = $query->orderBy('uo.order_id')->execute();
+  while ($recipient = $recipients->fetchAssoc()) {
+    fputcsv($fp, $recipient);
+  }
+  fclose($fp);
+  exit;
+}
+
+/**
+ * Builds a query to retrieve gift order information for display or export.
+ */
+function _uc_gift_order_get_recipient_query() {
+  $query = db_select('uc_orders', 'uo');
+
+  $query->innerJoin('uc_gift_orders', 'ugo', 'uo.order_id = ugo.order_id');
+  $query->leftJoin('uc_countries', 'uc', 'uo.delivery_country = uc.country_id');
+  $query->leftJoin('uc_zones', 'uz', 'uo.delivery_zone = uz.zone_id');
+
+  $query->fields('uo', array(
+    'order_id',
+    'delivery_first_name',
+    'delivery_last_name',
+    'delivery_street1',
+    'delivery_street2',
+    'delivery_city',
+  ));
+  $query->addField('uz', 'zone_code');
+  $query->addField('uo', 'delivery_postal_code');
+  $query->addField('uc', 'country_iso_code_2');
+
+  $query->addExpression("DATE_FORMAT(FROM_UNIXTIME(uo.created), '%m/%d/%Y')", 'created');
+
+  $query->condition('ugo.gift_mark', 1);
+  $query->condition('uo.order_status', 'completed');
+
+  return $query;
+}

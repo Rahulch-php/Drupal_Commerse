@@ -1,0 +1,99 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the Firstdata Global Gateway e4 module.
+ */
+
+/**
+ * Implements hook_requirements().
+ */
+
+
+function uc_egrfirstdatae4_requirements($phase) {
+  $requirements = array();
+  $t = get_t();
+
+  $has_soap = extension_loaded('soap');
+
+  // Firstdata Global Gateway e4 requires SOAP extension.
+
+    $requirements['uc_egrfirstdatae4_soap'] = array(
+      'title' => $t('SOAP'),
+      'value' => $has_soap ? $t('Enabled') : $t('Not found'),
+    );
+    if (!$has_soap) {
+      $requirements['uc_egrfirstdatae4_soap']['severity'] = REQUIREMENT_ERROR;
+      $requirements['uc_egrfirstdatae4_soap']['description'] = $t("First Data Global Gateway e4 requires the SOAP extension enabled!");
+    }
+
+  return $requirements;
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+
+
+function uc_egrfirstdatae4_uninstall() {
+ db_drop_table('uc_payment_egrfirstdatae4');
+
+ db_delete('variable')
+    ->condition('name', 'uc_egrfirstdatae4_%', 'LIKE')
+    ->execute();
+}
+
+
+/**
+ * Implements hook_install().
+ */
+
+
+function uc_egrfirstdatae4_install() {
+
+$schema['uc_payment_egrfirstdatae4'] = array(
+    'description' => 'First Data Global Gateway e4',
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'size' => 'big',
+        'not null' => TRUE,
+      ),
+      'order_id' => array(
+        'type' => 'int',
+        'size' => 'big',
+        'not null' => TRUE,
+      ),
+      'transaction_type' => array(
+         'type' => 'varchar',
+         'length' => '5',
+       ),	
+      'transaction_tag' => array(
+        'type' => 'varchar',
+        'length' => '15',
+      ),
+       'authorization_num' => array(
+        'type' => 'varchar',
+        'length' => '15',
+      ),
+      'bank_response_code' => array(
+        'type' => 'varchar',
+        'length' => '5',
+      ),
+      'bank_response_msg' => array(
+        'type' => 'varchar',
+        'length' => '50',
+      ),
+       'client_ip' => array(
+        'type' => 'varchar',
+        'length' => '20',
+      ),      
+      'ctr' => array(
+         'type' => 'text',
+         'size' => 'big',
+       ),	
+    ),
+    'primary key' => array('id'),
+  );
+  db_create_table('uc_payment_egrfirstdatae4', $schema['uc_payment_egrfirstdatae4']);
+}
